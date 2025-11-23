@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Позвонить бабушке</title>
+  <style>
+    body{font-family:Arial,sans-serif; max-width:600px; margin:20px auto; background:#f2f4ff; color:#222; padding:20px; border-radius:16px;}
+    h1{text-align:center;}
+    button{width:100%; padding:18px; font-size:20px; border:none; border-radius:14px; margin-top:14px; background:#4a7afe; color:white; cursor:pointer;}
+    video{border-radius:50%; width:45%; display:none; background:#000; margin-bottom:12px;}
+  </style>
+</head>
+<body>
+<h1>Позвонить бабушке</h1>
+
+<select id="callType" style="width:100%; padding:10px; font-size:16px; margin-bottom:20px;">
+  <option value="audio">Аудио</option>
+  <option value="video">Видео</option>
+</select>
+
+<button id="callGrandma">Позвонить бабушке</button>
+<button id="endCall">Завершить звонок</button>
+
+<div id="videoGrid" style="display:flex; gap:15px;">
+  <video id="localVideo" autoplay playsinline muted></video>
+  <video id="remoteVideo" autoplay playsinline></video>
+</div>
+
+<script>
+const WS_URL = "wss://" + window.location.host;
+let pc, localStream, ws;
+
+const callBtn = document.getElementById('callGrandma');
+const endBtn = document.getElementById('endCall');
+const callTypeSelect = document.getElementById('callType');
+const localVideo = document.getElementById('localVideo');
+const remoteVideo = document.getElementById('remoteVideo');
+
+ws = new WebSocket(WS_URL);
+ws.onmessage = async (msg) => {
+  let data = JSON.parse(msg.data);
+  if(!pc) await initPC();
+  if(data.type==='offer'){
+    await pc.setRemoteDescription(data.offer);
+    const ans = await pc.createAnswer();
+    await pc.setLocalDescription(ans);
+    ws.send(JSON.stringify({type:'answer', answer:ans}));
+  }
+  if(data.type==='answer'){
+    await pc.setRemoteDescription(data.answer);
+  }
+  if(data.type==='candidate'){
+    await pc.addIceCandidate(data.candidate);
+  }
+};
+
+async function initPC(){
+  pc = new RTCPeerConnection({iceServers:[{urls:"stun:stun.l.google.com:19302"}]});
+  pc.onicecandidate = e => { if(e.candidate) ws.send(JSON.stringify({type:'candidate', candidate:e.candidate})); };
+  pc.ontrack = e => { remoteVideo.srcObject = e.streams[0]; if(callTypeSelect.value==='video'){ remoteVideo.style.display='block'; } };
+  localStream = await navigator.mediaDevices.getUserMedia(callTypeSelect.value==='video'?{audio:true,video:true}:{audio:true,video:false});
+  localStream.getTracks().forEach(t => pc.addTrack(t, localStream));
+  localVideo.srcObject = localStream;
+  if(callTypeSelect.value==='video'){ localVideo.style.display='block'; }
+}
+
+callBtn.onclick = async()=>{
+  if(!pc) await initPC();
+  const offer = await pc.createOffer();
+  await pc.setLocalDescription(offer);
+  ws.send(JSON.stringify({type:'offer', offer}));
+};
+
+endBtn.onclick = ()=>{
+  if(pc){ pc.close(); pc=null; }
+  localVideo.style.display='none';
+  remoteVideo.style.display='none';
+};
+</script>
+</body>
+</html>
